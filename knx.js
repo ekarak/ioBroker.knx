@@ -11,7 +11,7 @@ var util        = require('util');
 var mapping = {};
 var states  = {};
 var knxConnection;
-var controlDPTarray = {};
+var knxDatapoints = {};
 
 var adapter = utils.adapter({
     // name has to be set and has to be equal to adapters folder name and main file name excluding extension
@@ -80,7 +80,7 @@ adapter.on('message', function (obj) {
     if (obj) {
         switch (obj.command) {
             case 'project':
-                pasrseProject(obj.message.xml0, obj.message.knx_master, function (res) {
+                parseProject(obj.message.xml0, obj.message.knx_master, function (res) {
                     if (obj.callback) adapter.sendTo(obj.from, obj.command, res, obj.callback);
                     setTimeout(function () {
                         process.exit();
@@ -97,7 +97,7 @@ adapter.on('message', function (obj) {
     return true;
 });
 
-function pasrseProject(xml0, knx_master, callback) {
+function parseProject(xml0, knx_master, callback) {
     getGAS.getGAS(xml0, knx_master, function (error, result) {
         if (error) {
             callback({error: error});
@@ -269,27 +269,18 @@ function startKnxServer() {
         handlers: {
             connected: function() {
                 var cnt = 0;
-                if (isEmptyObject(controlDPTarray)) {
+                if (isEmptyObject(knxDatapoints)) {
                     for (var key in mapping) {
                         if ((key.match(/\d*\/\d*\/\d*/)) && ((mapping[key].common.desc) && (mapping[key].common.desc.indexOf('DP') != -1))) {
                             try {
-                                    if (mapping[key].common.read) {
-                                        controlDPTarray[key] = new knx.Datapoint({
-                                            ga: key,
-                                            dpt: convertDPTtype(mapping[key].common.desc),
-                                            autoread: true
-                                        }, knxConnection);
-                                        console.log(cnt + '  generate controlDPT : ' + controlDPTarray[key].options.ga + '     ' + controlDPTarray[key].options.dpt + ' READABLE');
-                                    } else {
-                                        controlDPTarray[key] = new knx.Datapoint({
-                                            ga: key,
-                                            dpt: convertDPTtype(mapping[key].common.desc)
-                                        }, knxConnection);
-                                        console.log(cnt + '  generate controlDPT : ' + controlDPTarray[key].options.ga + '     ' + controlDPTarray[key].options.dpt);
-                                    }
-
-
-                                cnt++;
+                              dptoptions = {
+                                ga: key,
+                                dpt: convertDPTtype(mapping[key].common.desc)
+                              }
+                              if (mapping[key].common.read) dptoptions.autoread = true;
+                              knxDatapoints[key] = new knx.Datapoint(dptoptions, knxConnection);
+                              console.log('  %d generate datapoint : %s   %s',
+                                cnt++, key, (dptoptions.autoread ? ' READABLE': ''));
                             }
                             catch (e) {
                                 console.warn(' could not create controlDPT for ' + key + ' with error: ' + e );
@@ -321,7 +312,7 @@ function startKnxServer() {
                         var mappedName;
                         if (mapping[dest]) {
                             mappedName = mapping[dest].common.name;
-                            adapter.setForeignState(mapping[dest]._id, {val: controlDPTarray[dest].current_value, ack:true});
+                            adapter.setForeignState(mapping[dest]._id, {val: knxDatapoints[dest].current_value, ack:true});
                         }
                         adapter.log.info('CHANGE from ' + src + ' to ' + '(' + dest + ') ' + mappedName + ': '+val);
                     break;
@@ -331,25 +322,25 @@ function startKnxServer() {
 
                         if (mapping[dest] && val !== undefined) {
                             var obj = mapping[dest];
-                            //controlDPTarray[dest].current_value = val;
-                            if (controlDPTarray[dest]) {
-                                console.log('Write Value of ' + dest + ' ' + controlDPTarray[dest].current_value);
+                            //knxDatapoints[dest].current_value = val;
+                            if (knxDatapoints[dest]) {
+                                console.log('Write Value of ' + dest + ' ' + knxDatapoints[dest].current_value);
                             } else {
-                                console.log('No controlDPTarray for ' + dest);
+                                console.log('No knxDatapoints for ' + dest);
                             }
 
                             if (val && typeof val === 'object') {
-                                if (controlDPTarray[dest]){
+                                if (knxDatapoints[dest]){
                                     try {
-                                        adapter.log.debug('WRITE : mappedName : ' + mapping[dest].common.name + '    dest : ' + dest + '  val: ' + controlDPTarray[dest].toString() + '   (' + convertDPTtype(obj.common.desc) + ') ' + obj._id.replace(/(.*\.)/g, ''));
-                                        adapter.setForeignState(mapping[dest]._id, {val: controlDPTarray[dest].current_value, ack:true});
+                                        adapter.log.debug('WRITE : mappedName : ' + mapping[dest].common.name + '    dest : ' + dest + '  val: ' + knxDatapoints[dest].toString() + '   (' + convertDPTtype(obj.common.desc) + ') ' + obj._id.replace(/(.*\.)/g, ''));
+                                        adapter.setForeignState(mapping[dest]._id, {val: knxDatapoints[dest].current_value, ack:true});
                                     } catch(e){
                                         console.info('Wrong bufferlength on ga:' + obj._id + ' mit ' + e);
                                     }
                                 }
                             }
                         } else {
-                            adapter.log.warn('Value recieved on unknown GA : ' + dest );
+                            adapter.log.warn('Value received on unknown GA : ' + dest );
                             //  adapter.setForeignState(mapping[dest]._id, val , true);
                         }
                     break;
